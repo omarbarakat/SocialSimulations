@@ -36,7 +36,7 @@ initial_wealth = 100.0
 soceity_size = 50
 num_connections = 10 			# TODO [NOT USED] maybe use it at some point to limit connections
 num_distribution_bins = 100
-num_generations = 1
+num_generations = 500
 num_games_per_simulation = 100*soceity_size	# average n games/individual
 use_synth_pop = False
 use_global_knowledge = True
@@ -64,34 +64,19 @@ def get_distribution_bin_ind(value):
 
 # wealth multipliers based on wealth of the players
 # outcomes returned are in order: outcome[decisions.cheat][decisions.cooperate] means p1 cheated and p2 cooperated
-# NOTE: these are absolute amounts: not symmetric between players
-def get_game_payoffs_var(p1_wealth, p2_wealth):
-	base_project_profit = 0.5
-	participation_ratio = 0.2
-	net_profit = participation_ratio*(p1_wealth+p2_wealth)*base_project_profit
+# The multiplers are the same as those of the prisoners dilemma +3. Refer to wikipedia. Notice, using these numbers make the expectation reduce to (P_cheat-P_coop)
+def get_game_payoffs(p1_wealth, p2_wealth):
+	scale = 40
+	# # make scale dependent on the wealth
+	# scale = 0.2*(p1_wealth+p2_wealth)
 	return {
 		decisions.cheat: {
-			decisions.cheat: -(0.5*participation_ratio)*p1_wealth,	# lose half the participated amount
-			decisions.cooperate: net_profit							# get the whole profit!
+			decisions.cheat: 0*scale,
+			decisions.cooperate: 1*scale
 		},
 		decisions.cooperate: {
-			decisions.cheat: -participation_ratio*p1_wealth,			# lose the participated amount
-			decisions.cooperate: 0.5*net_profit							# split the profit
-		},
-	}
-
-def get_game_payoffs(p1_wealth, p2_wealth):	# THE BUG IS HERE: The E(payoff) is constant!
-	base_project_profit = 0.5
-	participation = 20
-	net_profit = (2*participation)*base_project_profit
-	return {
-		decisions.cheat: {
-			decisions.cheat: -(0.5*participation),	# lose half the participated amount
-			decisions.cooperate: net_profit							# get the whole profit!
-		},
-		decisions.cooperate: {
-			decisions.cheat: -participation,			# lose the participated amount
-			decisions.cooperate: 0.5*net_profit							# split the profit
+			decisions.cheat: -1*scale,
+			decisions.cooperate: 0.5*scale
 		},
 	}
 
@@ -121,9 +106,6 @@ def make_decision(p1, trade_payoff, p1_trust_in_p2):
 			p1_trust_in_p2*trade_payoff[decisions.cheat][decisions.cooperate]+
 			(1-p1_trust_in_p2)*trade_payoff[decisions.cheat][decisions.cheat]
 		)
-	print(trade_payoff[decisions.cheat][decisions.cooperate])
-	print(p1_trust_in_p2)
-	print(str(expected_return_cheating)+"  "+str(expected_return_cooperating))
 	prob = p1[ get_distribution_bin_ind(expected_return_cheating - expected_return_cooperating) ]
 	return decisions.cheat if prob > random() else decisions.cooperate 	# the decision is deterministic for now
 
@@ -154,9 +136,9 @@ def update_soceity_stats(population, games):
 		segments_trace[s]['goodness'].append( seg_total_goodness[s]/len(sorted_pop) )
 	one_cheats=0; both_cheat=0; both_coop=0;
 	for g in games:
-		if g['p1_decision']!=g['p2_decision']: one_cheats+=1
-		elif g['p1_decision']==decisions.cheat: both_cheat+=1
-		else: both_coop+=1
+		if g['p1_decision']!=g['p2_decision']: one_cheats+=1.0/num_games_per_simulation
+		elif g['p1_decision']==decisions.cheat: both_cheat+=1.0/num_games_per_simulation
+		else: both_coop+=1.0/num_games_per_simulation
 	decision_distribution['one_cheats'].append(one_cheats)
 	decision_distribution['both_cheat'].append(both_cheat)
 	decision_distribution['both_coop'].append(both_coop)
@@ -226,6 +208,7 @@ def cx(ind1, ind2):
 	ind1.wealth = ind2.wealth = new_wealth
 	ind1.connections_ids = []; ind2.connections_ids = []
 	ind1.parents = ind2.parents = parents
+	return ind1, ind2
 
 def init_env():
 	creator.create("FitnessMax", base.Fitness, weights=(1.0,))
@@ -274,7 +257,7 @@ if __name__ == "__main__":
 	# SIMULATE
 	print("[log] generating population")
 	population = toolbox.population(n=soceity_size)
-	old_record = 0
+	old_record = 0; repeated=0
 	for gen in range(num_generations):
 		print("[log] simulating the world! processing generation: "+str(gen))
 		offspring = algorithms.varAnd(population, toolbox, cxpb=0.5, mutpb=0.05)
@@ -288,7 +271,8 @@ if __name__ == "__main__":
 			ind.fitness.values = (f,)
 			new_record = max(new_record, f)
 		print("improvement = "+str(new_record-old_record)+" with gain "+str(new_record))
-		if new_record == old_record:
+		repeated = repeated+1 if new_record==old_record else 0
+		if repeated==3:
 			print("CONVERGED")
 			break
 		old_record = new_record
@@ -337,5 +321,5 @@ if __name__ == "__main__":
 	plt.plot(decision_distribution['both_coop'], 'g', label='both_coop')
 	plt.plot(decision_distribution['both_cheat'], 'r', label='both_cheat')
 	plt.plot(decision_distribution['one_cheats'], 'y', label='one_cheats')
-	plt.title('class transition over generations'); plt.legend(); 
+	plt.title('action distribution'); plt.legend(); 
 	plt.show()
