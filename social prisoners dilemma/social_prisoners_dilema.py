@@ -20,7 +20,7 @@
 # - For the final generation, the final graph for the probability given the payoff for an average individual will be plotted
 
 # TODO:
-# - track behaviors of different segments of the soceity (P[cheat] over generations): Will be super interesting with inheritance!
+# - track the effect of soceity size, number of games played, 
 
 from math import log, floor, ceil, sqrt
 from enum import Enum
@@ -33,10 +33,10 @@ import sys
 
 # Parameters
 initial_wealth = 100.0
-soceity_size = 50
+soceity_size = 30
 num_connections = 10 			# TODO [NOT USED] maybe use it at some point to limit connections
 num_distribution_bins = 100
-num_generations = 500
+num_generations = 10
 num_games_per_simulation = 100*soceity_size	# average n games/individual
 use_synth_pop = False
 use_global_knowledge = True
@@ -44,10 +44,10 @@ use_inheritance = False
 if use_synth_pop: num_games_per_simulation = 3*soceity_size
 
 # Data containers
-decisions = Enum('decisions', 'cheat cooperate')
+decisions = Enum('cheat', 'cooperate') # Enum('decisions', 'cheat cooperate')
 gene_activity = [0]*num_distribution_bins
 num_segments = 3
-segments_trace = defaultdict(lambda: {'wealth': [], 'goodness': []})
+segments_trace = defaultdict(lambda: {'wealth': [], 'goodness': [], 'actual_goodness': []})
 class_transition = {'higher': [], 'lower': []}
 decision_distribution = {'both_cheat': [], 'one_cheats': [], 'both_coop': []}
 
@@ -117,31 +117,39 @@ def update_soceity_stats(population, games):
 	cnt_stepped_up = 0
 	cnt_stepped_down = 0
 	sorted_pop = sorted(population, key=lambda i: i.wealth, reverse=True)
+	# decision distribution
+	actual_goodness = [[0, 0] for i in range(len(population))]	# stores the actual goodness in a numerator-denomerator form in a tuple per individual, respectively
+	one_cheats=0; both_cheat=0; both_coop=0;
+	for g in games:
+		if g['p1_decision']!=g['p2_decision']: one_cheats+=1.0/num_games_per_simulation
+		elif g['p1_decision']==decisions.cheat: both_cheat+=1.0/num_games_per_simulation
+		else: both_coop+=1.0/num_games_per_simulation
+		actual_goodness[g['p1_id']][0] += 1 if g['p1_decision']==decisions.cooperate else 0; actual_goodness[g['p1_id']][1] += 1
+		actual_goodness[g['p2_id']][0] += 1 if g['p2_decision']==decisions.cooperate else 0; actual_goodness[g['p2_id']][1] += 1
+	decision_distribution['one_cheats'].append(one_cheats)
+	decision_distribution['both_cheat'].append(both_cheat)
+	decision_distribution['both_coop'].append(both_coop)
+	# segments: wealth, goodness and transition
 	seg_total_wealth = [0]*num_segments
 	seg_total_goodness = [0]*num_segments
+	seg_total_act_goodness = [0]*num_segments
 	i=0
 	for i in range(len(sorted_pop)):	# loop on individuals
-		seg = int(i/(len(sorted_pop)/num_segments))
+		seg = int(i*1.0/(len(sorted_pop)*1.0/num_segments))
 		ind = sorted_pop[i]
 		seg_total_wealth[seg] += ind.wealth
 		seg_total_goodness[seg] += np.mean(ind)
+		seg_total_act_goodness[seg] += actual_goodness[ind.id][0]*1.0/max(1, actual_goodness[ind.id][1])
 		new_segments[ind.id] = seg
 		cnt_stepped_up   += (1 if seg>min(parents_segments[ind.parents[0]], parents_segments[ind.parents[1]]) else 0)
 		cnt_stepped_down += (1 if seg<max(parents_segments[ind.parents[0]], parents_segments[ind.parents[1]]) else 0)
 	class_transition['higher'].append(cnt_stepped_up/soceity_size)
 	class_transition['lower'].append(-cnt_stepped_down/soceity_size)
 	parents_segments = new_segments
-	for s in range(num_segments):		# loop on segmens and append stats
+	for s in range(num_segments):		# loop on segments and append stats
 		segments_trace[s]['wealth'].append( seg_total_wealth[s]/len(sorted_pop) )
 		segments_trace[s]['goodness'].append( seg_total_goodness[s]/len(sorted_pop) )
-	one_cheats=0; both_cheat=0; both_coop=0;
-	for g in games:
-		if g['p1_decision']!=g['p2_decision']: one_cheats+=1.0/num_games_per_simulation
-		elif g['p1_decision']==decisions.cheat: both_cheat+=1.0/num_games_per_simulation
-		else: both_coop+=1.0/num_games_per_simulation
-	decision_distribution['one_cheats'].append(one_cheats)
-	decision_distribution['both_cheat'].append(both_cheat)
-	decision_distribution['both_coop'].append(both_coop)
+		segments_trace[s]['actual_goodness'].append( seg_total_act_goodness[s]/len(sorted_pop) )
 	
 # fitness function
 def fitness(wealth):
@@ -300,26 +308,33 @@ if __name__ == "__main__":
 	# Plot progression of soceity segments
 	# Plot wealth
 	plt.figure("Progression over generations")
-	plt.subplot(4, 1, 1)
+	plt.subplot(5, 1, 1)
 	for i in range(num_segments):
 		plt.plot(segments_trace[i]['wealth'], label='segment '+str(i))
 	plt.plot([np.mean([segments_trace[j]['wealth'][i] for j in range(num_segments)]) for i in range(len(segments_trace[0]['wealth']))], label='overall wealth', linestyle=':')
 	plt.title('wealth of segments over generations'); plt.legend();
 	# Plot goodness
-	plt.subplot(4, 1, 2)
+	plt.subplot(5, 1, 2)
 	for i in range(num_segments):
 		plt.plot(segments_trace[i]['goodness'], label='segment '+str(i))
 	plt.plot([np.mean([segments_trace[j]['goodness'][i] for j in range(num_segments)]) for i in range(len(segments_trace[0]['goodness']))], label='overall goodness', linestyle=':')
 	plt.title('goodness of segments over generations'); plt.legend(); 
+	# Plot actual goodness
+	plt.subplot(5, 1, 3)
+	for i in range(num_segments):
+		plt.plot(segments_trace[i]['actual_goodness'], label='segment '+str(i))
+	plt.plot([np.mean([segments_trace[j]['actual_goodness'][i] for j in range(num_segments)]) for i in range(len(segments_trace[0]['actual_goodness']))], label='overall co-ratio', linestyle=':')
+	plt.title('actual_goodness of segments over generations (ratio of games cooperated)'); plt.legend(); 
 	# Plot class transition
-	plt.subplot(4, 1, 3)
+	plt.subplot(5, 1, 4)
 	plt.plot(class_transition['higher'], 'g^', label='up')
 	plt.plot(class_transition['lower'], 'rv', label='down')
 	plt.title('class transition over generations'); plt.legend(); 
 	# Plot decision distribution
-	plt.subplot(4, 1, 4)
+	plt.subplot(5, 1, 5)
 	plt.plot(decision_distribution['both_coop'], 'g', label='both_coop')
 	plt.plot(decision_distribution['both_cheat'], 'r', label='both_cheat')
 	plt.plot(decision_distribution['one_cheats'], 'y', label='one_cheats')
 	plt.title('action distribution'); plt.legend(); 
+	# Show time!
 	plt.show()
